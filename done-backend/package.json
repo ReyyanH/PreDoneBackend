@@ -1,5 +1,5 @@
 {
-  "name": "done-backend",
+  "name": "done-backend-tedious",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
@@ -10,6 +10,6 @@
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "odbc": "^2.4.9"
+    "tedious": "^15.0.0"
   }
 }
