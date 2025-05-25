@@ -11,17 +11,18 @@ app.use(cors());
 app.use(bodyParser.json());
 
 const config = {
-  server: "doneserver.database.windows.net",
+  server: process.env.DB_SERVER,
   authentication: {
     type: "default",
     options: {
-      userName: "HOR220164",
-      password: "Schu1e!noetig?"
+      userName: process.env.DB_USER,
+      password: process.env.DB_PASSWORD
     }
   },
   options: {
-    database: "doneDB_20250408",
-    encrypt: true
+    database: process.env.DB_NAME,
+    encrypt: true,
+    trustServerCertificate: true // Crucial for Azure
   }
 };
 
