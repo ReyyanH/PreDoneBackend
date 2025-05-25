@@ -138,21 +138,6 @@ app.delete('/project/:id', (req, res) => {
   );
 });
 
-// Todo Routes
-app.get('/todos/:user', (req, res) => {
-  executeQuery(
-    `SELECT t.*, pr.pr_name as priority_name 
-     FROM t_todo t
-     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-     WHERE t.t_user = @user`,
-    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
-});
-
 app.get('/todo/:id/user/:user', (req, res) => {
   executeQuery(
     `SELECT t.*, pr.pr_name as priority_name 
@@ -170,25 +155,54 @@ app.get('/todo/:id/user/:user', (req, res) => {
   );
 });
 
-app.post('/todo', (req, res) => {
-  const { title, description, reminder, beginning, ending, priority, projectId, user } = req.body;
+// POST - Create todo for specific user
+app.post('/todo/:user', (req, res) => {
+  const { user } = req.params;
+  const { title, description, projectId, priority } = req.body;
+
   executeQuery(
-    `INSERT INTO t_todo (t_titel, t_description, t_reminder, t_beginning, 
-      t_ending, t_pr_priority, p_project_p_id, t_user, t_done)
-     VALUES (@title, @description, @reminder, @beginning, @ending, @priority, @projectId, @user, 0)`,
+    `INSERT INTO t_todo (t_titel, t_description, t_user, p_project_p_id, t_pr_priority, t_done, t_beginning)
+     VALUES (@title, @description, @user, @projectId, @priority, 0, GETDATE())`,
     [
       { name: 'title', type: TYPES.VarChar, value: title },
       { name: 'description', type: TYPES.VarChar, value: description },
-      { name: 'reminder', type: TYPES.DateTime, value: reminder },
-      { name: 'beginning', type: TYPES.DateTime, value: beginning },
-      { name: 'ending', type: TYPES.DateTime, value: ending },
-      { name: 'priority', type: TYPES.Int, value: priority },
+      { name: 'user', type: TYPES.VarChar, value: user },
       { name: 'projectId', type: TYPES.Int, value: projectId },
-      { name: 'user', type: TYPES.VarChar, value: user }
+      { name: 'priority', type: TYPES.Int, value: priority }
     ],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.status(201).json({ message: 'Todo created' });
+    }
+  );
+});
+
+// GET - Get all todos for a user
+app.get('/todos/:user', (req, res) => {
+  executeQuery(
+    `SELECT t.*, pr.pr_name as priority_name 
+     FROM t_todo t
+     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+     WHERE t.t_user = @user`,
+    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
+    (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    }
+  );
+});
+
+// DELETE - Delete a todo for specific user
+app.delete('/todo/:id/:user', (req, res) => {
+  executeQuery(
+    `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
+    [
+      { name: 'id', type: TYPES.Int, value: req.params.id },
+      { name: 'user', type: TYPES.VarChar, value: req.params.user }
+    ],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'Todo deleted' });
     }
   );
 });
