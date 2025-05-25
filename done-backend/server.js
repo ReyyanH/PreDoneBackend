@@ -24,7 +24,7 @@ const config = {
     encrypt: true,
     trustServerCertificate: true // Crucial for Azure
   }
-};
+};  
 
 function executeQuery(sql, parameters = [], callback) {
   const connection = new Connection(config);
@@ -83,20 +83,6 @@ app.get('/users', (req, res) => {
   });
 });
 
-app.get('/projects/:user', (req, res) => {
-  executeQuery(
-    `SELECT p.* FROM p_project p
-     JOIN t_todo t ON p.p_id = t.p_project_p_id
-     WHERE t.t_user = @user
-     GROUP BY p.p_id, p.p_titel, p.p_color`,
-    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
-});
-
 app.get('/project/:id/user/:user', (req, res) => {
   executeQuery(
     `SELECT p.* FROM p_project p
@@ -113,17 +99,47 @@ app.get('/project/:id/user/:user', (req, res) => {
   );
 });
 
-app.post('/project', (req, res) => {
+app.post('/project/:user', (req, res) => {
+  const { user } = req.params;
   const { title, color } = req.body;
+
+  // First verify user exists
   executeQuery(
-    `INSERT INTO p_project (p_titel, p_color) OUTPUT INSERTED.p_id VALUES (@title, @color)`,
-    [
-      { name: 'title', type: TYPES.VarChar, value: title },
-      { name: 'color', type: TYPES.VarChar, value: color }
-    ],
+    `SELECT 1 FROM u_user WHERE u_username = @user`,
+    [{ name: 'user', type: TYPES.VarChar, value: user }],
+    (err, userExists) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (userExists.length === 0) {
+        return res.status(400).json({ error: 'User does not exist' });
+      }
+
+      // Create project
+      executeQuery(
+        `INSERT INTO p_project (p_titel, p_color, t_user) 
+         OUTPUT INSERTED.p_id
+         VALUES (@title, @color, @user)`,
+        [
+          { name: 'title', type: TYPES.VarChar, value: title },
+          { name: 'color', type: TYPES.VarChar, value: color },
+          { name: 'user', type: TYPES.VarChar, value: user }
+        ],
+        (err, data) => {
+          if (err) return res.status(500).json({ error: err.message });
+          res.status(201).json({ projectId: data[0].p_id });
+        }
+      );
+    }
+  );
+});
+
+// GET - Get all projects for a user
+app.get('/projects/:user', (req, res) => {
+  executeQuery(
+    `SELECT * FROM p_project WHERE t_user = @user`,
+    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
     (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ projectId: data[0].p_id });
+      res.json(data);
     }
   );
 });
