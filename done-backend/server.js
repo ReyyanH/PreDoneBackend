@@ -75,7 +75,13 @@ app.post('/user', (req, res) => {
   );
 });
 
-// Project Routes
+app.get('/users', (req, res) => {
+  executeQuery("SELECT u_username, u_password FROM u_user", (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(data);
+  });
+});
+
 app.get('/projects/:user', (req, res) => {
   executeQuery(
     `SELECT p.* FROM p_project p
