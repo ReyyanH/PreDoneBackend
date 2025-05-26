@@ -60,11 +60,11 @@ function executeQuery(sql, parameters = [], callback) {
   connection.connect();
 }
 
-// User Routes
+// User Routess
 app.post('/user', (req, res) => {
   const { username, password } = req.body;
   executeQuery(
-    `INSERT INTO u_user (u_username, u_password) VALUES (@username, @password)`,
+    `INSERT INTO u_user (u_username, u_password) VALUES (@username, @password)` ,
     [
       { name: 'username', type: TYPES.VarChar, value: username },
       { name: 'password', type: TYPES.VarChar, value: password }
