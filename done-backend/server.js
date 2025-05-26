@@ -224,6 +224,63 @@ app.delete('/todo/:id/:user', (req, res) => {
   );
 });
 
+// PUT - Update a project (full update)
+app.put('/project/:id/user/:user', (req, res) => {
+  const { id, user } = req.params;
+  const { title, color } = req.body;
+
+  if (!title && !color) {
+    return res.status(400).json({ error: 'Title or color required for update' });
+  }
+
+  // Verify user exists
+  executeQuery(
+    `SELECT 1 FROM u_user WHERE u_username = @user`,
+    [{ name: 'user', type: TYPES.VarChar, value: user }],
+    (err, userExists) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (userExists.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Build dynamic update query
+      let updateFields = [];
+      let params = [
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'user', type: TYPES.VarChar, value: user }
+      ];
+
+      if (title) {
+        updateFields.push('p_titel = @title');
+        params.push({ name: 'title', type: TYPES.VarChar, value: title });
+      }
+      
+      if (color) {
+        updateFields.push('p_color = @color');
+        params.push({ name: 'color', type: TYPES.VarChar, value: color });
+      }
+
+      const sql = `
+        UPDATE p_project 
+        SET ${updateFields.join(', ')} 
+        WHERE p_id = @id AND t_user = @user
+      `;
+
+      executeQuery(sql, params, (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (data.affectedRows === 0) {
+          return res.status(404).json({ 
+            error: 'Project not found or user mismatch' 
+          });
+        }
+        
+        res.json({ message: 'Project updated successfully' });
+      });
+    }
+  );
+});
+
 app.put('/todo/:id', (req, res) => {
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
   executeQuery(
