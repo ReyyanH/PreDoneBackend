@@ -22,9 +22,12 @@ const config = {
   options: {
     database: process.env.DB_NAME,
     encrypt: true,
-    trustServerCertificate: true // Crucial for Azure
+    port: 1433, // Explicit port for Azure SQL
+    trustServerCertificate: false, // Should be false in production
+    connectTimeout: 30000, // 30 seconds timeout
+    requestTimeout: 30000  // 30 seconds timeout
   }
-};  
+};
 
 function executeQuery(sql, parameters = [], callback) {
   const connection = new Connection(config);
