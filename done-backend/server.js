@@ -124,7 +124,7 @@ app.post('/project/:user', (req, res) => {
 
       // Create project
       executeQuery(
-        `INSERT INTO p_project (p_titel, p_color, t_user) 
+        `INSERT INTO p_project (p_title, p_color, t_user) 
          OUTPUT INSERTED.p_id
          VALUES (@title, @color, @user)`,
         [
@@ -192,7 +192,7 @@ app.post('/todo/:user', (req, res) => {
 
   executeQuery(
     `INSERT INTO t_todo (
-      t_titel, t_description, t_user, p_project_p_id, 
+      t_title, t_description, t_user, p_project_p_id, 
       t_pr_priority, t_done, t_beginning, t_ending, t_reminder
     ) VALUES (
       @title, @description, @user, @projectId, 
@@ -271,7 +271,7 @@ app.put('/project/:id/user/:user', (req, res) => {
       ];
 
       if (title) {
-        updateFields.push('p_titel = @title');
+        updateFields.push('p_title = @title');
         params.push({ name: 'title', type: TYPES.VarChar, value: title });
       }
       
