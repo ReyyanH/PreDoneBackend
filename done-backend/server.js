@@ -188,17 +188,24 @@ app.get('/todo/:id/user/:user', (req, res) => {
 // POST - Create todo for specific user
 app.post('/todo/:user', (req, res) => {
   const { user } = req.params;
-  const { title, description, projectId, priority } = req.body;
+  const { title, description, projectId, priority, ending, reminder } = req.body;
 
   executeQuery(
-    `INSERT INTO t_todo (t_titel, t_description, t_user, p_project_p_id, t_pr_priority, t_done, t_beginning)
-     VALUES (@title, @description, @user, @projectId, @priority, 0, GETDATE())`,
+    `INSERT INTO t_todo (
+      t_titel, t_description, t_user, p_project_p_id, 
+      t_pr_priority, t_done, t_beginning, t_ending, t_reminder
+    ) VALUES (
+      @title, @description, @user, @projectId, 
+      @priority, 0, GETDATE(), @ending, @reminder
+    )`,
     [
       { name: 'title', type: TYPES.VarChar, value: title },
       { name: 'description', type: TYPES.VarChar, value: description },
       { name: 'user', type: TYPES.VarChar, value: user },
       { name: 'projectId', type: TYPES.Int, value: projectId },
-      { name: 'priority', type: TYPES.Int, value: priority }
+      { name: 'priority', type: TYPES.Int, value: priority },
+      { name: 'ending', type: TYPES.DateTime, value: ending || null },
+      { name: 'reminder', type: TYPES.DateTime, value: reminder || null }
     ],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -431,6 +438,28 @@ app.get('/todo/date/:date', (req, res) => {
       { name: 'user', type: TYPES.VarChar, value: user },
       { name: 'startDate', type: TYPES.DateTime, value: startDate },
       { name: 'endDate', type: TYPES.DateTime, value: endDate }
+    ],
+    (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    }
+  );
+});
+
+app.get('/todo/filter/done', (req, res) => {
+  const user = req.query.user;
+  
+  if (!user) {
+    return res.status(400).json({ error: 'User parameter is required' });
+  }
+
+  executeQuery(
+    `SELECT t.*, pr.pr_name as priority_name 
+     FROM t_todo t
+     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+     WHERE t.t_user = @user AND t.t_done = 1`,
+    [
+      { name: 'user', type: TYPES.VarChar, value: user }
     ],
     (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
