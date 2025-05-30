@@ -34,7 +34,11 @@ function executeQuery(sql, parameters = [], callback) {
     if (err) return callback(err);
 
     const request = new Request(sql, (err) => {
-      if (err) return callback(err);
+      if (err) {
+        connection.close();
+        return callback(err);
+      }
+      // Don't call callback here for success - wait for 'requestCompleted'
     });
 
     parameters.forEach(param => {
@@ -51,10 +55,19 @@ function executeQuery(sql, parameters = [], callback) {
 
     request.on('requestCompleted', () => {
       connection.close();
-      callback(null, results);
+      callback(null, results); // This is correct
+    });
+
+    request.on('error', (err) => {
+      connection.close();
+      callback(err);
     });
 
     connection.execSql(request);
+  });
+
+  connection.on('error', (err) => {
+    callback(err);
   });
 
   connection.connect();
@@ -64,7 +77,7 @@ function executeQuery(sql, parameters = [], callback) {
 app.post('/user', (req, res) => {
   const { username, password } = req.body;
   executeQuery(
-    `INSERT INTO u_user (u_username, u_password) VALUES (@username, @password)` ,
+    `INSERT INTO u_user (u_username, u_password) VALUES (@username, @password)`,
     [
       { name: 'username', type: TYPES.VarChar, value: username },
       { name: 'password', type: TYPES.VarChar, value: password }
@@ -85,9 +98,7 @@ app.get('/users', (req, res) => {
 
 app.get('/project/:id/user/:user', (req, res) => {
   executeQuery(
-    `SELECT p.* FROM p_project p
-     JOIN t_todo t ON p.p_id = t.p_project_p_id
-     WHERE p.p_id = @id AND t.t_user = @user`,
+    `SELECT * FROM p_project WHERE p_id = @id AND t_user = @user`,
     [
       { name: 'id', type: TYPES.Int, value: req.params.id },
       { name: 'user', type: TYPES.VarChar, value: req.params.user }
@@ -144,10 +155,14 @@ app.get('/projects/:user', (req, res) => {
   );
 });
 
-app.delete('/project/:id', (req, res) => {
+app.delete('/project/:id/user/:user', (req, res) => {
   executeQuery(
-    `DELETE FROM p_project WHERE p_id = @id`,
-    [{ name: 'id', type: TYPES.Int, value: req.params.id }],
+    `DELETE FROM p_project 
+     WHERE p_id = @id AND t_user = @user`,
+    [
+      { name: 'id', type: TYPES.Int, value: req.params.id },
+      { name: 'user', type: TYPES.VarChar, value: req.params.user }
+    ],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Project deleted' });
@@ -280,8 +295,7 @@ app.put('/project/:id/user/:user', (req, res) => {
     }
   );
 });
-
-app.put('/todo/:id', (req, res) => {
+app.put('/todo/:id/user/:user', (req, res) => {
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
   executeQuery(
     `UPDATE t_todo SET
@@ -292,7 +306,7 @@ app.put('/todo/:id', (req, res) => {
       t_ending = @ending,
       t_pr_priority = @priority,
       t_done = @done
-     WHERE t_id = @id`,
+     WHERE t_id = @id AND t_user = @user`,
     [
       { name: 'title', type: TYPES.VarChar, value: title },
       { name: 'description', type: TYPES.VarChar, value: description },
@@ -310,9 +324,9 @@ app.put('/todo/:id', (req, res) => {
   );
 });
 
-app.delete('/todo/:id', (req, res) => {
+app.delete('/todo/:id/user/:user', (req, res) => {
   executeQuery(
-    `DELETE FROM t_todo WHERE t_id = @id`,
+    `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
     [{ name: 'id', type: TYPES.Int, value: req.params.id }],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
