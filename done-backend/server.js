@@ -338,26 +338,30 @@ app.get('/', (req, res) => {
   res.send('✅ Enhanced Backend läuft!');
 });
 
-// Get all users
-app.get('/users', async (req, res) => {
-  try {
-    const data = await executeQuery(`SELECT * FROM u_user`);
-    res.json(data);
-  } catch (err) {
-    console.error('Database error:', err);
-    res.status(500).json({ error: 'Failed to fetch users' });
-  }
+// Add these routes after your existing routes
+
+// GET - Get all users
+app.get('/users', (req, res) => {
+  executeQuery(
+    `SELECT * FROM u_user`,
+    [],
+    (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    }
+  );
 });
 
-// Get priorities
-app.get('/priorities', async (req, res) => {
-  try {
-    const data = await executeQuery("SELECT * FROM pr_priority");
-    res.json(data);
-  } catch (err) {
-    console.error('Database error:', err);
-    res.status(500).json({ error: 'Failed to fetch priorities' });
-  }
+// GET - Get all priorities
+app.get('/priorities', (req, res) => {
+  executeQuery(
+    `SELECT * FROM p_priority`,
+    [],
+    (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    }
+  );
 });
 
 app.listen(port, () => {
