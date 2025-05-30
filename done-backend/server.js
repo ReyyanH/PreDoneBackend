@@ -306,7 +306,7 @@ app.put('/todo/:id/user/:user', (req, res) => {
 
   executeQuery(
     `UPDATE t_todo SET
-      t_titel = @title,
+      t_title = @title,
       t_description = @description,
       t_reminder = @reminder,
       t_beginning = @beginning,
