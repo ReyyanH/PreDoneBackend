@@ -301,7 +301,9 @@ app.put('/project/:id/user/:user', (req, res) => {
   );
 });
 app.put('/todo/:id/user/:user', (req, res) => {
+  const { id, user } = req.params;
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
+
   executeQuery(
     `UPDATE t_todo SET
       t_titel = @title,
@@ -315,12 +317,13 @@ app.put('/todo/:id/user/:user', (req, res) => {
     [
       { name: 'title', type: TYPES.VarChar, value: title },
       { name: 'description', type: TYPES.VarChar, value: description },
-      { name: 'reminder', type: TYPES.DateTime, value: reminder },
+      { name: 'reminder', type: TYPES.DateTime, value: reminder || null },
       { name: 'beginning', type: TYPES.DateTime, value: beginning },
-      { name: 'ending', type: TYPES.DateTime, value: ending },
+      { name: 'ending', type: TYPES.DateTime, value: ending || null },
       { name: 'priority', type: TYPES.Int, value: priority },
-      { name: 'done', type: TYPES.Int, value: done },
-      { name: 'id', type: TYPES.Int, value: req.params.id }
+      { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },  // Convert boolean to bit
+      { name: 'id', type: TYPES.Int, value: id },
+      { name: 'user', type: TYPES.VarChar, value: user }  // ADDED MISSING PARAM
     ],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
