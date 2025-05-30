@@ -89,12 +89,7 @@ app.post('/user', (req, res) => {
   );
 });
 
-app.get('/users', (req, res) => {
-  executeQuery("SELECT u_username, u_password FROM u_user", (err, data) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(data);
-  });
-});
+
 
 app.get('/project/:id/user/:user', (req, res) => {
   executeQuery(
@@ -340,11 +335,26 @@ app.get('/', (req, res) => {
   res.send('✅ Enhanced Backend läuft!');
 });
 
-app.get('/priorities', (req, res) => {
-  executeQuery("SELECT * FROM pr_priority", (err, data) => {
-    if (err) return res.status(500).json({ error: err.message });
+// Get all users
+app.get('/users', async (req, res) => {
+  try {
+    const data = await executeQuery(`SELECT * FROM u_user`);
     res.json(data);
-  });
+  } catch (err) {
+    console.error('Database error:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Get priorities
+app.get('/priorities', async (req, res) => {
+  try {
+    const data = await executeQuery("SELECT * FROM pr_priority");
+    res.json(data);
+  } catch (err) {
+    console.error('Database error:', err);
+    res.status(500).json({ error: 'Failed to fetch priorities' });
+  }
 });
 
 app.listen(port, () => {
