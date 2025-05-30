@@ -390,10 +390,6 @@ app.get('/todo/filter', (req, res) => {
              WHERE 1=1`;
   const params = [];
 
-  if (user) {
-    sql += ' AND t.t_user = @user';
-    params.push({ name: 'user', type: TYPES.VarChar, value: user });
-  }
   if (start) {
     sql += ' AND t_ending >= @start';
     params.push({ name: 'start', type: TYPES.DateTime, value: start });
@@ -413,7 +409,35 @@ app.get('/todo/filter', (req, res) => {
   });
 });
 
+app.get('/todo/date/:date', (req, res) => {
+  const date = req.params.date;
+  const user = req.query.user; 
+  
+  if (!user) {
+    return res.status(400).json({ error: 'User parameter is required' });
+  }
 
+  const startDate = `${date}T00:00:00`;
+  const endDate = `${date}T23:59:59`;
+  
+  executeQuery(
+    `SELECT t.*, pr.pr_name as priority_name 
+     FROM t_todo t
+     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+     WHERE t.t_user = @user 
+       AND t.t_ending >= @startDate 
+       AND t.t_ending <= @endDate`,
+    [
+      { name: 'user', type: TYPES.VarChar, value: user },
+      { name: 'startDate', type: TYPES.DateTime, value: startDate },
+      { name: 'endDate', type: TYPES.DateTime, value: endDate }
+    ],
+    (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    }
+  );
+});
 
 app.listen(port, () => {
   console.log(`🚀 Server läuft auf Port ${port}`);
