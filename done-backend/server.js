@@ -355,7 +355,7 @@ app.get('/users', (req, res) => {
 // GET - Get all priorities
 app.get('/priorities', (req, res) => {
   executeQuery(
-    `SELECT * FROM p_priority`,
+    `SELECT * FROM pr_priority`,
     [],
     (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
