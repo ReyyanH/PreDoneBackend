@@ -32,16 +32,19 @@ const config = {
 function executeQuery(sql, parameters = [], callback) {
   const connection = new Connection(config);
   const results = [];
+  let callbackInvoked = false; // Guard against multiple calls
+
+  function safeCallback(...args) {
+    if (callbackInvoked) return;
+    callbackInvoked = true;
+    callback(...args);
+  }
 
   connection.on('connect', err => {
-    if (err) return callback(err);
+    if (err) return safeCallback(err);
 
     const request = new Request(sql, (err) => {
-      if (err) {
-        connection.close();
-        return callback(err);
-      }
-      // Don't call callback here for success - wait for 'requestCompleted'
+      // Do nothing here - use events instead
     });
 
     parameters.forEach(param => {
@@ -58,19 +61,19 @@ function executeQuery(sql, parameters = [], callback) {
 
     request.on('requestCompleted', () => {
       connection.close();
-      callback(null, results); // This is correct
+      safeCallback(null, results);
     });
 
     request.on('error', (err) => {
       connection.close();
-      callback(err);
+      safeCallback(err);
     });
 
     connection.execSql(request);
   });
 
   connection.on('error', (err) => {
-    callback(err);
+    safeCallback(err);
   });
 
   connection.connect();
@@ -304,6 +307,9 @@ app.put('/todo/:id/user/:user', (req, res) => {
   const { id, user } = req.params;
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
 
+  // Add response guard
+  let responded = false;
+
   executeQuery(
     `UPDATE t_todo SET
       t_title = @title,
@@ -321,17 +327,24 @@ app.put('/todo/:id/user/:user', (req, res) => {
       { name: 'beginning', type: TYPES.DateTime, value: beginning },
       { name: 'ending', type: TYPES.DateTime, value: ending || null },
       { name: 'priority', type: TYPES.Int, value: priority },
-      { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },  // Convert boolean to bit
+      { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },
       { name: 'id', type: TYPES.Int, value: id },
-      { name: 'user', type: TYPES.VarChar, value: user }  // ADDED MISSING PARAM
+      { name: 'user', type: TYPES.VarChar, value: user }
     ],
     (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+      // Prevent multiple responses
+      if (responded) return;
+      responded = true;
+      
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
       res.json({ message: 'Todo updated' });
     }
   );
 });
-
 app.delete('/todo/:id/user/:user', (req, res) => {
   executeQuery(
     `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
