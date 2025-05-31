@@ -98,7 +98,37 @@ app.post('/user', (req, res) => {
   );
 });
 
+app.put('/user/:username', (req, res) => {
+  const { username } = req.params;
+  const { newPassword } = req.body;
+  let responded = false;
 
+  executeQuery(
+    `UPDATE u_user 
+     SET u_password = @newPassword
+     WHERE u_username = @username`,
+    [
+      { name: 'username', type: TYPES.VarChar, value: username },
+      { name: 'newPassword', type: TYPES.VarChar, value: newPassword }
+    ],
+    (err, result) => {
+      if (responded) return;
+      responded = true;
+      
+      if (err) {
+        console.error('Password update error:', err);
+        return res.status(500).json({ error: err.message });
+      }
+
+      // Check if any rows were affected
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      res.json({ message: 'Password updated successfully' });
+    }
+  );
+});
 
 app.get('/project/:id/user/:user', (req, res) => {
   executeQuery(
