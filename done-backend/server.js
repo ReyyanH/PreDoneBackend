@@ -136,7 +136,7 @@ app.post('/project/:user', (req, res) => {
 
       // Create project
       executeQuery(
-        `INSERT INTO p_project (p_titel, p_color, t_user) 
+        `INSERT INTO p_project (p_title, p_color, t_user) 
          OUTPUT INSERTED.p_id
          VALUES (@title, @color, @user)`,
         [
