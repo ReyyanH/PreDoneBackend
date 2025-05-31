@@ -32,19 +32,24 @@ const config = {
 function executeQuery(sql, parameters = [], callback) {
   const connection = new Connection(config);
   const results = [];
-  let callbackInvoked = false; // Guard against multiple calls
+  let callbackInvoked = false;
 
-  function safeCallback(...args) {
+  // Safe callback wrapper
+  const safeCallback = (err, data) => {
     if (callbackInvoked) return;
     callbackInvoked = true;
-    callback(...args);
-  }
+    try {
+      callback(err, data);
+    } finally {
+      connection.close();
+    }
+  };
 
   connection.on('connect', err => {
     if (err) return safeCallback(err);
-
-    const request = new Request(sql, (err) => {
-      // Do nothing here - use events instead
+    
+    const request = new Request(sql, err => {
+      if (err) safeCallback(err);
     });
 
     parameters.forEach(param => {
@@ -60,19 +65,17 @@ function executeQuery(sql, parameters = [], callback) {
     });
 
     request.on('requestCompleted', () => {
-      connection.close();
       safeCallback(null, results);
     });
 
-    request.on('error', (err) => {
-      connection.close();
+    request.on('error', err => {
       safeCallback(err);
     });
 
     connection.execSql(request);
   });
 
-  connection.on('error', (err) => {
+  connection.on('error', err => {
     safeCallback(err);
   });
 
@@ -114,20 +117,26 @@ app.get('/project/:id/user/:user', (req, res) => {
 app.post('/project/:user', (req, res) => {
   const { user } = req.params;
   const { title, color } = req.body;
+  let responded = false;
 
   // First verify user exists
   executeQuery(
     `SELECT 1 FROM u_user WHERE u_username = @user`,
     [{ name: 'user', type: TYPES.VarChar, value: user }],
     (err, userExists) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (responded) return;
+      if (err) {
+        responded = true;
+        return res.status(500).json({ error: err.message });
+      }
       if (userExists.length === 0) {
+        responded = true;
         return res.status(400).json({ error: 'User does not exist' });
       }
 
       // Create project
       executeQuery(
-        `INSERT INTO p_project (p_title, p_color, t_user) 
+        `INSERT INTO p_project (p_titel, p_color, t_user) 
          OUTPUT INSERTED.p_id
          VALUES (@title, @color, @user)`,
         [
@@ -136,7 +145,20 @@ app.post('/project/:user', (req, res) => {
           { name: 'user', type: TYPES.VarChar, value: user }
         ],
         (err, data) => {
-          if (err) return res.status(500).json({ error: err.message });
+          if (responded) return;
+          responded = true;
+          
+          if (err) {
+            return res.status(500).json({ error: err.message });
+          }
+          
+          // Check if data is valid
+          if (!data || !data.length || !data[0].p_id) {
+            return res.status(500).json({ 
+              error: 'Failed to create project or retrieve project ID' 
+            });
+          }
+          
           res.status(201).json({ projectId: data[0].p_id });
         }
       );
@@ -306,9 +328,12 @@ app.put('/project/:id/user/:user', (req, res) => {
 app.put('/todo/:id/user/:user', (req, res) => {
   const { id, user } = req.params;
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
-
-  // Add response guard
   let responded = false;
+
+  // Validate required fields
+  if (!title || !description) {
+    return res.status(400).json({ error: 'Title and description are required' });
+  }
 
   executeQuery(
     `UPDATE t_todo SET
@@ -332,7 +357,6 @@ app.put('/todo/:id/user/:user', (req, res) => {
       { name: 'user', type: TYPES.VarChar, value: user }
     ],
     (err) => {
-      // Prevent multiple responses
       if (responded) return;
       responded = true;
       
@@ -345,6 +369,7 @@ app.put('/todo/:id/user/:user', (req, res) => {
     }
   );
 });
+
 app.delete('/todo/:id/user/:user', (req, res) => {
   executeQuery(
     `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
@@ -482,6 +507,21 @@ app.get('/todo/filter/done', (req, res) => {
       res.json(data);
     }
   );
+});
+
+// Add before app.listen
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  // Graceful shutdown
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+app.use((err, req, res, next) => {
+  console.error('Global Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(port, () => {
