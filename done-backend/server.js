@@ -98,36 +98,101 @@ app.post('/user', (req, res) => {
   );
 });
 
-app.put('/user/:username', (req, res) => {
-  const { username } = req.params;
-  const { newPassword } = req.body;
+app.put('/user/:oldUsername', (req, res) => {
+  const { oldUsername } = req.params;
+  const { newUsername, newPassword } = req.body;
   let responded = false;
 
-  executeQuery(
-    `UPDATE u_user 
-     SET u_password = @newPassword
-     WHERE u_username = @username`,
-    [
-      { name: 'username', type: TYPES.VarChar, value: username },
-      { name: 'newPassword', type: TYPES.VarChar, value: newPassword }
-    ],
-    (err, result) => {
+  // Validate input
+  if (!newUsername && !newPassword) {
+    return res.status(400).json({
+      error: 'At least one field (newUsername or newPassword) is required'
+    });
+  }
+
+  if (newUsername && newUsername.length < 3) {
+    return res.status(400).json({
+      error: 'Username must be at least 3 characters'
+    });
+  }
+
+  if (newPassword && newPassword.length < 6) {
+    return res.status(400).json({
+      error: 'Password must be at least 6 characters'
+    });
+  }
+
+  // 1. Check if new username is available
+  if (newUsername) {
+    executeQuery(
+      `SELECT 1 FROM u_user WHERE u_username = @newUsername`,
+      [{ name: 'newUsername', type: TYPES.NVarChar, value: newUsername }],
+      (err, data) => {
+        if (responded) return;
+        
+        if (err) {
+          responded = true;
+          return res.status(500).json({ error: err.message });
+        }
+        
+        if (data.length > 0) {
+          responded = true;
+          return res.status(409).json({ error: 'Username already exists' });
+        }
+        
+        // 2. Perform the update
+        updateUser();
+      }
+    );
+  } else {
+    // Only password update needed
+    updateUser();
+  }
+
+  function updateUser() {
+    let sql = `UPDATE u_user SET `;
+    const params = [];
+    
+    if (newUsername && newPassword) {
+      sql += `u_username = @newUsername, u_password = @newPassword`;
+      params.push(
+        { name: 'newUsername', type: TYPES.NVarChar, value: newUsername },
+        { name: 'newPassword', type: TYPES.NVarChar, value: newPassword }
+      );
+    } else if (newUsername) {
+      sql += `u_username = @newUsername`;
+      params.push({ name: 'newUsername', type: TYPES.NVarChar, value: newUsername });
+    } else {
+      sql += `u_password = @newPassword`;
+      params.push({ name: 'newPassword', type: TYPES.NVarChar, value: newPassword });
+    }
+    
+    sql += ` WHERE u_username = @oldUsername`;
+    params.push({ name: 'oldUsername', type: TYPES.NVarChar, value: oldUsername });
+
+    executeQuery(sql, params, (err, result) => {
       if (responded) return;
       responded = true;
       
       if (err) {
-        console.error('Password update error:', err);
+        console.error('User update error:', err);
         return res.status(500).json({ error: err.message });
       }
-
-      // Check if any rows were affected
-      if (result.affectedRows === 0) {
+      
+      // Check if user was found and updated
+      if (result.rowsAffected === 0) {
         return res.status(404).json({ error: 'User not found' });
       }
       
-      res.json({ message: 'Password updated successfully' });
-    }
-  );
+      res.json({ 
+        message: 'User updated successfully',
+        updatedFields: {
+          ...(newUsername && { username: newUsername }),
+          ...(newPassword && { password: 'updated' })
+        }
+      });
+    });
+  }
 });
 
 app.get('/project/:id/user/:user', (req, res) => {
