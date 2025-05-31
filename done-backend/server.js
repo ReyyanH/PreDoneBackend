@@ -509,6 +509,56 @@ app.get('/todo/filter/done', (req, res) => {
   );
 });
 
+app.get('/todo/search', (req, res) => {
+  const { term, user, searchDescription = 'false' } = req.query;
+  let responded = false;
+  
+  // Validate required parameters
+  if (!term || !user) {
+    return res.status(400).json({
+      error: 'Both "term" and "user" query parameters are required'
+    });
+  }
+
+  // Prepare search parameters
+  const searchTerm = `%${term}%`;
+  const searchDesc = searchDescription.toLowerCase() === 'true';
+  
+  let sql = `
+    SELECT t.*, pr.pr_name as priority_name 
+    FROM t_todo t
+    JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+    WHERE t.t_user = @user
+      AND (t.t_title LIKE @term
+  `;
+  
+  // Conditionally add description search
+  if (searchDesc) {
+    sql += ` OR t.t_description LIKE @term`;
+  }
+  
+  sql += `)`;
+  
+  executeQuery(
+    sql,
+    [
+      { name: 'user', type: TYPES.VarChar, value: user },
+      { name: 'term', type: TYPES.VarChar, value: searchTerm }
+    ],
+    (err, data) => {
+      if (responded) return;
+      responded = true;
+      
+      if (err) {
+        console.error('Search error:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      res.json(data);
+    }
+  );
+});
+
 // Add before app.listen
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
