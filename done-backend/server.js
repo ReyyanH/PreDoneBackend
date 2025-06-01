@@ -260,7 +260,7 @@ app.post('/project/:username', (req, res) => {
     if (!userId) return res.status(404).json({ error: 'User not found' });
 
     executeQuery(
-      `INSERT INTO p_project (p_titel, p_color, u_user_id) 
+      `INSERT INTO p_project (p_title, p_color, u_user_id) 
        OUTPUT INSERTED.p_id
        VALUES (@title, @color, @userId)`,
       [
@@ -342,7 +342,7 @@ app.put('/project/:id/user/:username', (req, res) => {
     ];
 
     if (title) {
-      updateFields.push('p_titel = @title');
+      updateFields.push('p_title = @title');
       params.push({ name: 'title', type: TYPES.VarChar, value: title });
     }
     
@@ -406,7 +406,7 @@ app.post('/todo/:username', (req, res) => {
 
     executeQuery(
       `INSERT INTO t_todo (
-        t_titel, t_description, u_user_id, p_project_p_id, 
+        t_title, t_description, u_user_id, p_project_p_id, 
         t_pr_priority, t_done, t_beginning, t_ending, t_reminder
       ) VALUES (
         @title, @description, @userId, @projectId, 
@@ -486,7 +486,7 @@ app.put('/todo/:id/user/:username', (req, res) => {
 
     executeQuery(
       `UPDATE t_todo SET
-        t_titel = @title,
+        t_title = @title,
         t_description = @description,
         t_reminder = @reminder,
         t_beginning = @beginning,
@@ -666,7 +666,7 @@ app.get('/todo/search', (req, res) => {
       FROM t_todo t
       JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
       WHERE t.u_user_id = @userId
-        AND (t.t_titel LIKE @term
+        AND (t.t_title LIKE @term
     `;
     
     if (searchDesc) {
