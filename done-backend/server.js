@@ -122,193 +122,82 @@ app.put('/user/:oldUsername', (req, res) => {
     });
   }
 
-  // Create a new connection for transaction
-  const connection = new Connection(config);
-  
-  connection.on('connect', err => {
-    if (err) {
-      if (!responded) {
-        responded = true;
-        return res.status(500).json({ error: `Connection failed: ${err.message}` });
-      }
-    }
-
-    const transaction = new Transaction(connection);
-    transaction.begin(err => {
-      if (err) {
-        if (!responded) {
+  // 1. Check if new username is available
+  if (newUsername) {
+    executeQuery(
+      `SELECT 1 FROM u_user WHERE u_username = @newUsername`,
+      [{ name: 'newUsername', type: TYPES.NVarChar, value: newUsername }],
+      (err, data) => {
+        if (responded) return;
+        
+        if (err) {
           responded = true;
-          return res.status(500).json({ error: `Transaction start failed: ${err.message}` });
-        }
-      }
-
-      // 1. Check if new username is available
-      if (newUsername) {
-        const checkRequest = new Request(
-          `SELECT 1 FROM u_user WHERE u_username = @newUsername`,
-          (err, rowCount) => {
-            if (err) {
-              transaction.rollback();
-              if (!responded) {
-                responded = true;
-                return res.status(500).json({ error: `Check failed: ${err.message}` });
-              }
-            }
-            
-            if (rowCount > 0) {
-              transaction.rollback();
-              if (!responded) {
-                responded = true;
-                return res.status(409).json({ error: 'Username already exists' });
-              }
-            }
-            
-            // Continue with updates
-            performUpdates();
-          }
-        );
-        
-        checkRequest.addParameter('newUsername', TYPES.NVarChar, newUsername);
-        connection.execSql(checkRequest);
-      } else {
-        // No username change needed
-        performUpdates();
-      }
-
-      function performUpdates() {
-        // 2. Update user table
-        let updateSql = `UPDATE u_user SET `;
-        const params = [];
-        
-        if (newUsername && newPassword) {
-          updateSql += `u_username = @newUsername, u_password = @newPassword`;
-          params.push(
-            { name: 'newUsername', type: TYPES.NVarChar, value: newUsername },
-            { name: 'newPassword', type: TYPES.NVarChar, value: newPassword }
-          );
-        } else if (newUsername) {
-          updateSql += `u_username = @newUsername`;
-          params.push({ name: 'newUsername', type: TYPES.NVarChar, value: newUsername });
-        } else {
-          updateSql += `u_password = @newPassword`;
-          params.push({ name: 'newPassword', type: TYPES.NVarChar, value: newPassword });
+          return res.status(500).json({ error: err.message });
         }
         
-        updateSql += ` WHERE u_username = @oldUsername`;
-        params.push({ name: 'oldUsername', type: TYPES.NVarChar, value: oldUsername });
-
-        const updateRequest = new Request(updateSql, (err, rowCount) => {
-          if (err) {
-            transaction.rollback();
-            if (!responded) {
-              responded = true;
-              return res.status(500).json({ error: `User update failed: ${err.message}` });
-            }
-          }
-          
-          if (rowCount === 0) {
-            transaction.rollback();
-            if (!responded) {
-              responded = true;
-              return res.status(404).json({ error: 'User not found' });
-            }
-          }
-          
-          // 3. Update foreign tables if username changed
-          if (newUsername) {
-            updateForeignTables();
-          } else {
-            commitTransaction();
-          }
-        });
-
-        // Add parameters
-        params.forEach(param => {
-          updateRequest.addParameter(param.name, param.type, param.value);
-        });
-
-        connection.execSql(updateRequest);
-      }
-
-      function updateForeignTables() {
-        // Update project table
-        const projectRequest = new Request(
-          `UPDATE p_project SET t_user = @newUsername WHERE t_user = @oldUsername`,
-          (err) => {
-            if (err) {
-              transaction.rollback();
-              if (!responded) {
-                responded = true;
-                return res.status(500).json({ error: `Project update failed: ${err.message}` });
-              }
-            }
-            
-            // Update todo table
-            const todoRequest = new Request(
-              `UPDATE t_todo SET t_user = @newUsername WHERE t_user = @oldUsername`,
-              (err) => {
-                if (err) {
-                  transaction.rollback();
-                  if (!responded) {
-                    responded = true;
-                    return res.status(500).json({ error: `Todo update failed: ${err.message}` });
-                  }
-                }
-                
-                commitTransaction();
-              }
-            );
-            
-            todoRequest.addParameter('oldUsername', TYPES.NVarChar, oldUsername);
-            todoRequest.addParameter('newUsername', TYPES.NVarChar, newUsername);
-            connection.execSql(todoRequest);
-          }
-        );
+        if (data.length > 0) {
+          responded = true;
+          return res.status(409).json({ error: 'Username already exists' });
+        }
         
-        projectRequest.addParameter('oldUsername', TYPES.NVarChar, oldUsername);
-        projectRequest.addParameter('newUsername', TYPES.NVarChar, newUsername);
-        connection.execSql(projectRequest);
+        // 2. Perform the update
+        updateUser();
       }
+    );
+  } else {
+    // Only password update needed
+    updateUser();
+  }
 
-      function commitTransaction() {
-        transaction.commit(err => {
-          if (err) {
-            transaction.rollback();
-            if (!responded) {
-              responded = true;
-              return res.status(500).json({ error: `Commit failed: ${err.message}` });
-            }
-          }
-          
-          if (!responded) {
-            responded = true;
-            res.json({ 
-              message: 'User updated successfully',
-              updatedFields: {
-                ...(newUsername && { username: newUsername }),
-                ...(newPassword && { password: 'updated' })
-              }
-            });
-          }
-          connection.close();
-        });
-      }
-    });
-  });
-
-  connection.on('error', err => {
-    if (!responded) {
-      responded = true;
-      res.status(500).json({ error: `Connection error: ${err.message}` });
+  function updateUser() {
+    let sql = `UPDATE u_user SET `;
+    const params = [];
+    
+    if (newUsername && newPassword) {
+      sql += `u_username = @newUsername, u_password = @newPassword`;
+      params.push(
+        { name: 'newUsername', type: TYPES.NVarChar, value: newUsername },
+        { name: 'newPassword', type: TYPES.NVarChar, value: newPassword }
+      );
+    } else if (newUsername) {
+      sql += `u_username = @newUsername`;
+      params.push({ name: 'newUsername', type: TYPES.NVarChar, value: newUsername });
+    } else {
+      sql += `u_password = @newPassword`;
+      params.push({ name: 'newPassword', type: TYPES.NVarChar, value: newPassword });
     }
-  });
+    
+    sql += ` WHERE u_username = @oldUsername`;
+    params.push({ name: 'oldUsername', type: TYPES.NVarChar, value: oldUsername });
 
-  connection.connect();
+    executeQuery(sql, params, (err, result) => {
+      if (responded) return;
+      responded = true;
+      
+      if (err) {
+        console.error('User update error:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      // Check if user was found and updated
+      if (result.rowsAffected === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      res.json({ 
+        message: 'User updated successfully',
+        updatedFields: {
+          ...(newUsername && { username: newUsername }),
+          ...(newPassword && { password: 'updated' })
+        }
+      });
+    });
+  }
 });
 
 app.get('/project/:id/user/:user', (req, res) => {
   executeQuery(
-    `SELECT * FROM p_project WHERE p_id = @id AND t_user = @user`,
+    `SELECT * FROM p_project WHERE p_id = @id AND u_user_id = @user`,
     [
       { name: 'id', type: TYPES.Int, value: req.params.id },
       { name: 'user', type: TYPES.VarChar, value: req.params.user }
@@ -342,7 +231,7 @@ app.post('/project/:user', (req, res) => {
 
       // Create project
       executeQuery(
-        `INSERT INTO p_project (p_title, p_color, t_user) 
+        `INSERT INTO p_project (p_title, p_color, u_user_id) 
          OUTPUT INSERTED.p_id
          VALUES (@title, @color, @user)`,
         [
@@ -375,7 +264,7 @@ app.post('/project/:user', (req, res) => {
 // GET - Get all projects for a user
 app.get('/projects/:user', (req, res) => {
   executeQuery(
-    `SELECT * FROM p_project WHERE t_user = @user`,
+    `SELECT * FROM p_project WHERE u_user_id = @user`,
     [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
     (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
