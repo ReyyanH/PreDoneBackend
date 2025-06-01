@@ -269,7 +269,6 @@ app.post('/project/:username', (req, res) => {
         { name: 'userId', type: TYPES.Int, value: userId }
       ],
       (err, data) => {
-        if (err) return res.status(500).json({ error: err.message });
         
         if (!data || !data.length || !data[0].p_id) {
           return res.status(500).json({ 
@@ -473,7 +472,7 @@ app.delete('/todo/:id/:username', (req, res) => {
 
 app.put('/todo/:id/user/:username', (req, res) => {
   const { id, username } = req.params;
-  const { title, description, reminder, beginning, ending, priority, done } = req.body;
+  const { title, description, reminder, beginning, ending, priority, done, projectId } = req.body;
   let responded = false;
 
   if (!title || !description) {
@@ -486,13 +485,14 @@ app.put('/todo/:id/user/:username', (req, res) => {
 
     executeQuery(
       `UPDATE t_todo SET
-        t_title = @title,
+        t_titel = @title,
         t_description = @description,
         t_reminder = @reminder,
         t_beginning = @beginning,
         t_ending = @ending,
         t_pr_priority = @priority,
-        t_done = @done
+        t_done = @done,
+        p_project_p_id = @projectId
        WHERE t_id = @id AND u_user_id = @userId`,
       [
         { name: 'title', type: TYPES.VarChar, value: title },
@@ -502,6 +502,7 @@ app.put('/todo/:id/user/:username', (req, res) => {
         { name: 'ending', type: TYPES.DateTime, value: ending || null },
         { name: 'priority', type: TYPES.Int, value: priority },
         { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },
+        { name: 'projectId', type: TYPES.Int, value: projectId },
         { name: 'id', type: TYPES.Int, value: id },
         { name: 'userId', type: TYPES.Int, value: userId }
       ],
@@ -519,7 +520,6 @@ app.put('/todo/:id/user/:username', (req, res) => {
     );
   });
 });
-
 // ADDITIONAL ROUTES
 app.get('/users', (req, res) => {
   executeQuery(`SELECT * FROM u_user`, [], (err, data) => {
