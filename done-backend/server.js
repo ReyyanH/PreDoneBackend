@@ -472,7 +472,7 @@ app.delete('/todo/:id/:username', (req, res) => {
 
 app.put('/todo/:id/user/:username', (req, res) => {
   const { id, username } = req.params;
-  const { title, description, reminder, beginning, ending, priority, done, projectId } = req.body;
+  const { title, description, reminder, beginning, ending, priority, done, projectId  } = req.body;
   let responded = false;
 
   if (!title || !description) {
