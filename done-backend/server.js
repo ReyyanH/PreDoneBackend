@@ -645,8 +645,7 @@ app.get('/todo/filter/done', (req, res) => {
 });
 
 app.get('/todo/search', (req, res) => {
-  const {username, searchDescription = 'false' } = req.query;
-  const term = req.query.term;
+  const {term, user, searchDescription = 'false' } = req.query;
   let responded = false;
   
   if (!term || !username) {
