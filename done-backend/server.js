@@ -648,13 +648,13 @@ app.get('/todo/search', (req, res) => {
   const {term, user, searchDescription = 'false' } = req.query;
   let responded = false;
   
-  if (!term || !username) {
+  if (!term || !user) {
     return res.status(400).json({
       error: 'Both "term" and "username" query parameters are required'
     });
   }
 
-  getUserId(username, (err, userId) => {
+  getUserId(user, (err, userId) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!userId) return res.status(404).json({ error: 'User not found' });
 
