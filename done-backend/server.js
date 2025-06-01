@@ -520,7 +520,7 @@ app.put('/todo/:id/user/:username', (req, res) => {
     );
   });
 });
-// ADDITIONAL ROUTES
+// ADDITIONAL ROUTE
 app.get('/users', (req, res) => {
   executeQuery(`SELECT * FROM u_user`, [], (err, data) => {
     if (err) return res.status(500).json({ error: err.message });
