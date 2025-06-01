@@ -332,7 +332,6 @@ app.put('/project/:id/user/:username', (req, res) => {
 
   getUserId(username, (err, userId) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (!userId) return res.status(404).json({ error: 'User not found' });
 
     let updateFields = [];
     let params = [
