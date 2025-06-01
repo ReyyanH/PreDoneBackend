@@ -550,9 +550,9 @@ app.get('/project/:projectId/todos', (req, res) => {
 });
 
 app.get('/todo/filter', (req, res) => {
-  const { start, end, priority, username } = req.query;
+  const { start, end, priority, user } = req.query;
   
-  getUserId(username, (err, userId) => {
+  getUserId(user, (err, userId) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!userId) return res.status(404).json({ error: 'User not found' });
 
@@ -586,7 +586,7 @@ app.get('/todo/filter', (req, res) => {
 
 app.get('/todo/date/:date', (req, res) => {
   const date = req.params.date;
-  const username = req.query.username; 
+  const username = req.query.user; 
   
   if (!username) {
     return res.status(400).json({ error: 'Username parameter is required' });
@@ -620,7 +620,7 @@ app.get('/todo/date/:date', (req, res) => {
 });
 
 app.get('/todo/filter/done', (req, res) => {
-  const username = req.query.username;
+  const username = req.query.user;
   
   if (!username) {
     return res.status(400).json({ error: 'Username parameter is required' });
