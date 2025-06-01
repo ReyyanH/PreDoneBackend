@@ -22,19 +22,58 @@ const config = {
   options: {
     database: process.env.DB_NAME,
     encrypt: true,
-    port: 1433, // Explicit port for Azure SQL
-    trustServerCertificate: false, // Should be false in production
-    connectTimeout: 30000, // 30 seconds timeout
-    requestTimeout: 30000  // 30 seconds timeout
+    port: 1433,
+    trustServerCertificate: false,
+    connectTimeout: 30000,
+    requestTimeout: 30000
   }
 };
+
+// Helper function to get user ID from username
+function getUserId(username, callback) {
+  const connection = new Connection(config);
+  connection.on('connect', err => {
+    if (err) return callback(err);
+    
+    const request = new Request(
+      `SELECT u_id FROM u_user WHERE u_username = @username`,
+      (err) => {
+        if (err) callback(err);
+      }
+    );
+    
+    request.addParameter('username', TYPES.VarChar, username);
+    
+    let userId = null;
+    request.on('row', columns => {
+      userId = columns[0].value;
+    });
+    
+    request.on('requestCompleted', () => {
+      callback(null, userId);
+      connection.close();
+    });
+    
+    request.on('error', err => {
+      callback(err);
+      connection.close();
+    });
+    
+    connection.execSql(request);
+  });
+  
+  connection.on('error', err => {
+    callback(err);
+  });
+  
+  connection.connect();
+}
 
 function executeQuery(sql, parameters = [], callback) {
   const connection = new Connection(config);
   const results = [];
   let callbackInvoked = false;
 
-  // Safe callback wrapper
   const safeCallback = (err, data) => {
     if (callbackInvoked) return;
     callbackInvoked = true;
@@ -82,7 +121,7 @@ function executeQuery(sql, parameters = [], callback) {
   connection.connect();
 }
 
-// User Routess
+// User Routes
 app.post('/user', (req, res) => {
   const { username, password } = req.body;
   executeQuery(
@@ -103,7 +142,6 @@ app.put('/user/:oldUsername', (req, res) => {
   const { newUsername, newPassword } = req.body;
   let responded = false;
 
-  // Validate input
   if (!newUsername && !newPassword) {
     return res.status(400).json({
       error: 'At least one field (newUsername or newPassword) is required'
@@ -122,7 +160,6 @@ app.put('/user/:oldUsername', (req, res) => {
     });
   }
 
-  // 1. Check if new username is available
   if (newUsername) {
     executeQuery(
       `SELECT 1 FROM u_user WHERE u_username = @newUsername`,
@@ -140,12 +177,10 @@ app.put('/user/:oldUsername', (req, res) => {
           return res.status(409).json({ error: 'Username already exists' });
         }
         
-        // 2. Perform the update
         updateUser();
       }
     );
   } else {
-    // Only password update needed
     updateUser();
   }
 
@@ -179,8 +214,7 @@ app.put('/user/:oldUsername', (req, res) => {
         return res.status(500).json({ error: err.message });
       }
       
-      // Check if user was found and updated
-      if (result.rowsAffected === 0) {
+      if (result.length === 0) {
         return res.status(404).json({ error: 'User not found' });
       }
       
@@ -195,328 +229,319 @@ app.put('/user/:oldUsername', (req, res) => {
   }
 });
 
-app.get('/project/:id/user/:user', (req, res) => {
-  executeQuery(
-    `SELECT * FROM p_project WHERE p_id = @id AND u_user_id = @user`,
-    [
-      { name: 'id', type: TYPES.Int, value: req.params.id },
-      { name: 'user', type: TYPES.VarChar, value: req.params.user }
-    ],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      data.length ? res.json(data[0]) : res.status(404).json({ error: 'Project not found' });
-    }
-  );
+// PROJECT ROUTES
+app.get('/project/:id/user/:username', (req, res) => {
+  const { id, username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `SELECT * FROM p_project WHERE p_id = @id AND u_user_id = @userId`,
+      [
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        data.length ? res.json(data[0]) : res.status(404).json({ error: 'Project not found' });
+      }
+    );
+  });
 });
 
-app.post('/project/:user', (req, res) => {
-  const { user } = req.params;
+app.post('/project/:username', (req, res) => {
+  const { username } = req.params;
   const { title, color } = req.body;
-  let responded = false;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
 
-  // First verify user exists
-  executeQuery(
-    `SELECT 1 FROM u_user WHERE u_username = @user`,
-    [{ name: 'user', type: TYPES.VarChar, value: user }],
-    (err, userExists) => {
-      if (responded) return;
-      if (err) {
-        responded = true;
-        return res.status(500).json({ error: err.message });
-      }
-      if (userExists.length === 0) {
-        responded = true;
-        return res.status(400).json({ error: 'User does not exist' });
-      }
-
-      // Create project
-      executeQuery(
-        `INSERT INTO p_project (p_title, p_color, u_user_id) 
-         OUTPUT INSERTED.p_id
-         VALUES (@title, @color, @user)`,
-        [
-          { name: 'title', type: TYPES.VarChar, value: title },
-          { name: 'color', type: TYPES.VarChar, value: color },
-          { name: 'user', type: TYPES.VarChar, value: user }
-        ],
-        (err, data) => {
-          if (responded) return;
-          responded = true;
-          
-          if (err) {
-            return res.status(500).json({ error: err.message });
-          }
-          
-          // Check if data is valid
-          if (!data || !data.length || !data[0].p_id) {
-            return res.status(500).json({ 
-              error: 'Failed to create project or retrieve project ID' 
-            });
-          }
-          
-          res.status(201).json({ projectId: data[0].p_id });
+    executeQuery(
+      `INSERT INTO p_project (p_titel, p_color, u_user_id) 
+       OUTPUT INSERTED.p_id
+       VALUES (@title, @color, @userId)`,
+      [
+        { name: 'title', type: TYPES.VarChar, value: title },
+        { name: 'color', type: TYPES.VarChar, value: color },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (!data || !data.length || !data[0].p_id) {
+          return res.status(500).json({ 
+            error: 'Failed to create project or retrieve project ID' 
+          });
         }
-      );
-    }
-  );
+        
+        res.status(201).json({ projectId: data[0].p_id });
+      }
+    );
+  });
 });
 
-// GET - Get all projects for a user
-app.get('/projects/:user', (req, res) => {
-  executeQuery(
-    `SELECT * FROM p_project WHERE u_user_id = @user`,
-    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
+app.get('/projects/:username', (req, res) => {
+  const { username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `SELECT * FROM p_project WHERE u_user_id = @userId`,
+      [{ name: 'userId', type: TYPES.Int, value: userId }],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(data);
+      }
+    );
+  });
 });
 
-app.delete('/project/:id/user/:user', (req, res) => {
-  executeQuery(
-    `DELETE FROM p_project 
-     WHERE p_id = @id AND t_user = @user`,
-    [
-      { name: 'id', type: TYPES.Int, value: req.params.id },
-      { name: 'user', type: TYPES.VarChar, value: req.params.user }
-    ],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Project deleted' });
-    }
-  );
+app.delete('/project/:id/user/:username', (req, res) => {
+  const { id, username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `DELETE FROM p_project 
+       WHERE p_id = @id AND u_user_id = @userId`,
+      [
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Project deleted' });
+      }
+    );
+  });
 });
 
-app.get('/todo/:id/user/:user', (req, res) => {
-  executeQuery(
-    `SELECT t.*, pr.pr_name as priority_name 
-     FROM t_todo t
-     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-     WHERE t.t_id = @id AND t.t_user = @user`,
-    [
-      { name: 'id', type: TYPES.Int, value: req.params.id },
-      { name: 'user', type: TYPES.VarChar, value: req.params.user }
-    ],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      data.length ? res.json(data[0]) : res.status(404).json({ error: 'Todo not found' });
-    }
-  );
-});
-
-// POST - Create todo for specific user
-app.post('/todo/:user', (req, res) => {
-  const { user } = req.params;
-  const { title, description, projectId, priority, ending, reminder } = req.body;
-
-  executeQuery(
-    `INSERT INTO t_todo (
-      t_title, t_description, t_user, p_project_p_id, 
-      t_pr_priority, t_done, t_beginning, t_ending, t_reminder
-    ) VALUES (
-      @title, @description, @user, @projectId, 
-      @priority, 0, GETDATE(), @ending, @reminder
-    )`,
-    [
-      { name: 'title', type: TYPES.VarChar, value: title },
-      { name: 'description', type: TYPES.VarChar, value: description },
-      { name: 'user', type: TYPES.VarChar, value: user },
-      { name: 'projectId', type: TYPES.Int, value: projectId },
-      { name: 'priority', type: TYPES.Int, value: priority },
-      { name: 'ending', type: TYPES.DateTime, value: ending || null },
-      { name: 'reminder', type: TYPES.DateTime, value: reminder || null }
-    ],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: 'Todo created' });
-    }
-  );
-});
-
-// GET - Get all todos for a user
-app.get('/todos/:user', (req, res) => {
-  executeQuery(
-    `SELECT t.*, pr.pr_name as priority_name 
-     FROM t_todo t
-     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-     WHERE t.t_user = @user`,
-    [{ name: 'user', type: TYPES.VarChar, value: req.params.user }],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
-});
-
-// DELETE - Delete a todo for specific user
-app.delete('/todo/:id/:user', (req, res) => {
-  executeQuery(
-    `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
-    [
-      { name: 'id', type: TYPES.Int, value: req.params.id },
-      { name: 'user', type: TYPES.VarChar, value: req.params.user }
-    ],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Todo deleted' });
-    }
-  );
-});
-
-// PUT - Update a project (full update)
-app.put('/project/:id/user/:user', (req, res) => {
-  const { id, user } = req.params;
+app.put('/project/:id/user/:username', (req, res) => {
+  const { id, username } = req.params;
   const { title, color } = req.body;
 
   if (!title && !color) {
     return res.status(400).json({ error: 'Title or color required for update' });
   }
 
-  // Verify user exists
-  executeQuery(
-    `SELECT 1 FROM u_user WHERE u_username = @user`,
-    [{ name: 'user', type: TYPES.VarChar, value: user }],
-    (err, userExists) => {
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    let updateFields = [];
+    let params = [
+      { name: 'id', type: TYPES.Int, value: id },
+      { name: 'userId', type: TYPES.Int, value: userId }
+    ];
+
+    if (title) {
+      updateFields.push('p_titel = @title');
+      params.push({ name: 'title', type: TYPES.VarChar, value: title });
+    }
+    
+    if (color) {
+      updateFields.push('p_color = @color');
+      params.push({ name: 'color', type: TYPES.VarChar, value: color });
+    }
+
+    const sql = `
+      UPDATE p_project 
+      SET ${updateFields.join(', ')} 
+      WHERE p_id = @id AND u_user_id = @userId
+    `;
+
+    executeQuery(sql, params, (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
-      if (userExists.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      // Build dynamic update query
-      let updateFields = [];
-      let params = [
-        { name: 'id', type: TYPES.Int, value: id },
-        { name: 'user', type: TYPES.VarChar, value: user }
-      ];
-
-      if (title) {
-        updateFields.push('p_title = @title');
-        params.push({ name: 'title', type: TYPES.VarChar, value: title });
+      
+      if (data.length === 0) {
+        return res.status(404).json({ 
+          error: 'Project not found or user mismatch' 
+        });
       }
       
-      if (color) {
-        updateFields.push('p_color = @color');
-        params.push({ name: 'color', type: TYPES.VarChar, value: color });
-      }
-
-      const sql = `
-        UPDATE p_project 
-        SET ${updateFields.join(', ')} 
-        WHERE p_id = @id AND t_user = @user
-      `;
-
-      executeQuery(sql, params, (err, data) => {
-        if (err) return res.status(500).json({ error: err.message });
-        
-        if (data.affectedRows === 0) {
-          return res.status(404).json({ 
-            error: 'Project not found or user mismatch' 
-          });
-        }
-        
-        res.json({ message: 'Project updated successfully' });
-      });
-    }
-  );
+      res.json({ message: 'Project updated successfully' });
+    });
+  });
 });
-app.put('/todo/:id/user/:user', (req, res) => {
-  const { id, user } = req.params;
+
+// TODO ROUTES
+app.get('/todo/:id/user/:username', (req, res) => {
+  const { id, username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `SELECT t.*, pr.pr_name as priority_name 
+       FROM t_todo t
+       JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+       WHERE t.t_id = @id AND t.u_user_id = @userId`,
+      [
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        data.length ? res.json(data[0]) : res.status(404).json({ error: 'Todo not found' });
+      }
+    );
+  });
+});
+
+app.post('/todo/:username', (req, res) => {
+  const { username } = req.params;
+  const { title, description, projectId, priority, ending, reminder } = req.body;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `INSERT INTO t_todo (
+        t_titel, t_description, u_user_id, p_project_p_id, 
+        t_pr_priority, t_done, t_beginning, t_ending, t_reminder
+      ) VALUES (
+        @title, @description, @userId, @projectId, 
+        @priority, 0, GETDATE(), @ending, @reminder
+      )`,
+      [
+        { name: 'title', type: TYPES.VarChar, value: title },
+        { name: 'description', type: TYPES.VarChar, value: description },
+        { name: 'userId', type: TYPES.Int, value: userId },
+        { name: 'projectId', type: TYPES.Int, value: projectId },
+        { name: 'priority', type: TYPES.Int, value: priority },
+        { name: 'ending', type: TYPES.DateTime, value: ending || null },
+        { name: 'reminder', type: TYPES.DateTime, value: reminder || null }
+      ],
+      (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(201).json({ message: 'Todo created' });
+      }
+    );
+  });
+});
+
+app.get('/todos/:username', (req, res) => {
+  const { username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `SELECT t.*, pr.pr_name as priority_name 
+       FROM t_todo t
+       JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+       WHERE t.u_user_id = @userId`,
+      [{ name: 'userId', type: TYPES.Int, value: userId }],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(data);
+      }
+    );
+  });
+});
+
+app.delete('/todo/:id/:username', (req, res) => {
+  const { id, username } = req.params;
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    executeQuery(
+      `DELETE FROM t_todo WHERE t_id = @id AND u_user_id = @userId`,
+      [
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Todo deleted' });
+      }
+    );
+  });
+});
+
+app.put('/todo/:id/user/:username', (req, res) => {
+  const { id, username } = req.params;
   const { title, description, reminder, beginning, ending, priority, done } = req.body;
   let responded = false;
 
-  // Validate required fields
   if (!title || !description) {
     return res.status(400).json({ error: 'Title and description are required' });
   }
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
 
-  executeQuery(
-    `UPDATE t_todo SET
-      t_title = @title,
-      t_description = @description,
-      t_reminder = @reminder,
-      t_beginning = @beginning,
-      t_ending = @ending,
-      t_pr_priority = @priority,
-      t_done = @done
-     WHERE t_id = @id AND t_user = @user`,
-    [
-      { name: 'title', type: TYPES.VarChar, value: title },
-      { name: 'description', type: TYPES.VarChar, value: description },
-      { name: 'reminder', type: TYPES.DateTime, value: reminder || null },
-      { name: 'beginning', type: TYPES.DateTime, value: beginning },
-      { name: 'ending', type: TYPES.DateTime, value: ending || null },
-      { name: 'priority', type: TYPES.Int, value: priority },
-      { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },
-      { name: 'id', type: TYPES.Int, value: id },
-      { name: 'user', type: TYPES.VarChar, value: user }
-    ],
-    (err) => {
-      if (responded) return;
-      responded = true;
-      
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: err.message });
+    executeQuery(
+      `UPDATE t_todo SET
+        t_titel = @title,
+        t_description = @description,
+        t_reminder = @reminder,
+        t_beginning = @beginning,
+        t_ending = @ending,
+        t_pr_priority = @priority,
+        t_done = @done
+       WHERE t_id = @id AND u_user_id = @userId`,
+      [
+        { name: 'title', type: TYPES.VarChar, value: title },
+        { name: 'description', type: TYPES.VarChar, value: description },
+        { name: 'reminder', type: TYPES.DateTime, value: reminder || null },
+        { name: 'beginning', type: TYPES.DateTime, value: beginning },
+        { name: 'ending', type: TYPES.DateTime, value: ending || null },
+        { name: 'priority', type: TYPES.Int, value: priority },
+        { name: 'done', type: TYPES.Bit, value: done ? 1 : 0 },
+        { name: 'id', type: TYPES.Int, value: id },
+        { name: 'userId', type: TYPES.Int, value: userId }
+      ],
+      (err) => {
+        if (responded) return;
+        responded = true;
+        
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: err.message });
+        }
+        
+        res.json({ message: 'Todo updated' });
       }
-      
-      res.json({ message: 'Todo updated' });
-    }
-  );
+    );
+  });
 });
 
-app.delete('/todo/:id/user/:user', (req, res) => {
-  executeQuery(
-    `DELETE FROM t_todo WHERE t_id = @id AND t_user = @user`,
-    [{ name: 'id', type: TYPES.Int, value: req.params.id }],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Todo deleted' });
-    }
-  );
-});
-
-// Additional Existing Routes
-app.get('/', (req, res) => {
-  res.send('✅ Enhanced Backend läuft!');
-});
-
-// Add these routes after your existing routes
-
-// GET - Get all users
+// ADDITIONAL ROUTES
 app.get('/users', (req, res) => {
-  executeQuery(
-    `SELECT * FROM u_user`,
-    [],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
+  executeQuery(`SELECT * FROM u_user`, [], (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(data);
+  });
 });
 
-// GET - Get all priorities
 app.get('/priorities', (req, res) => {
-  executeQuery(
-    `SELECT * FROM pr_priority`,
-    [],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
+  executeQuery(`SELECT * FROM pr_priority`, [], (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(data);
+  });
 });
 
-// Add this with your other todo routes
 app.get('/project/:projectId/todos', (req, res) => {
   executeQuery(
     `SELECT t.*, pr.pr_name as priority_name 
      FROM t_todo t
      JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
      WHERE p_project_p_id = @projectId`,
-    [
-      { name: 'projectId', type: TYPES.Int, value: req.params.projectId }
-    ],
+    [{ name: 'projectId', type: TYPES.Int, value: req.params.projectId }],
     (err, data) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(data);
@@ -524,140 +549,156 @@ app.get('/project/:projectId/todos', (req, res) => {
   );
 });
 
-// Add this with your other todo routes
 app.get('/todo/filter', (req, res) => {
-  const { start, end, priority, user } = req.query;
-  let sql = `SELECT t.*, pr.pr_name as priority_name 
-             FROM t_todo t
-             JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-             WHERE 1=1`;
-  const params = [];
-
-  if (start) {
-    sql += ' AND t_ending >= @start';
-    params.push({ name: 'start', type: TYPES.DateTime, value: start });
-  }
-  if (end) {
-    sql += ' AND t_ending <= @end';
-    params.push({ name: 'end', type: TYPES.DateTime, value: end });
-  }
-  if (priority) {
-    sql += ' AND t.t_pr_priority = @priority';
-    params.push({ name: 'priority', type: TYPES.Int, value: priority });
-  }
-
-  executeQuery(sql, params, (err, data) => {
+  const { start, end, priority, username } = req.query;
+  
+  getUserId(username, (err, userId) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(data);
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    let sql = `SELECT t.*, pr.pr_name as priority_name 
+               FROM t_todo t
+               JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+               WHERE t.u_user_id = @userId`;
+    const params = [
+      { name: 'userId', type: TYPES.Int, value: userId }
+    ];
+
+    if (start) {
+      sql += ' AND t_ending >= @start';
+      params.push({ name: 'start', type: TYPES.DateTime, value: start });
+    }
+    if (end) {
+      sql += ' AND t_ending <= @end';
+      params.push({ name: 'end', type: TYPES.DateTime, value: end });
+    }
+    if (priority) {
+      sql += ' AND t.t_pr_priority = @priority';
+      params.push({ name: 'priority', type: TYPES.Int, value: priority });
+    }
+
+    executeQuery(sql, params, (err, data) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(data);
+    });
   });
 });
 
 app.get('/todo/date/:date', (req, res) => {
   const date = req.params.date;
-  const user = req.query.user; 
+  const username = req.query.username; 
   
-  if (!user) {
-    return res.status(400).json({ error: 'User parameter is required' });
+  if (!username) {
+    return res.status(400).json({ error: 'Username parameter is required' });
   }
-
-  const startDate = `${date}T00:00:00`;
-  const endDate = `${date}T23:59:59`;
   
-  executeQuery(
-    `SELECT t.*, pr.pr_name as priority_name 
-     FROM t_todo t
-     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-     WHERE t.t_user = @user 
-       AND t.t_ending >= @startDate 
-       AND t.t_ending <= @endDate`,
-    [
-      { name: 'user', type: TYPES.VarChar, value: user },
-      { name: 'startDate', type: TYPES.DateTime, value: startDate },
-      { name: 'endDate', type: TYPES.DateTime, value: endDate }
-    ],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    const startDate = `${date}T00:00:00`;
+    const endDate = `${date}T23:59:59`;
+    
+    executeQuery(
+      `SELECT t.*, pr.pr_name as priority_name 
+       FROM t_todo t
+       JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+       WHERE t.u_user_id = @userId 
+         AND t.t_ending >= @startDate 
+         AND t.t_ending <= @endDate`,
+      [
+        { name: 'userId', type: TYPES.Int, value: userId },
+        { name: 'startDate', type: TYPES.DateTime, value: startDate },
+        { name: 'endDate', type: TYPES.DateTime, value: endDate }
+      ],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(data);
+      }
+    );
+  });
 });
 
 app.get('/todo/filter/done', (req, res) => {
-  const user = req.query.user;
+  const username = req.query.username;
   
-  if (!user) {
-    return res.status(400).json({ error: 'User parameter is required' });
+  if (!username) {
+    return res.status(400).json({ error: 'Username parameter is required' });
   }
+  
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
 
-  executeQuery(
-    `SELECT t.*, pr.pr_name as priority_name 
-     FROM t_todo t
-     JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-     WHERE t.t_user = @user AND t.t_done = 1`,
-    [
-      { name: 'user', type: TYPES.VarChar, value: user }
-    ],
-    (err, data) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(data);
-    }
-  );
+    executeQuery(
+      `SELECT t.*, pr.pr_name as priority_name 
+       FROM t_todo t
+       JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+       WHERE t.u_user_id = @userId AND t.t_done = 1`,
+      [{ name: 'userId', type: TYPES.Int, value: userId }],
+      (err, data) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(data);
+      }
+    );
+  });
 });
 
 app.get('/todo/search', (req, res) => {
-  const { term, user, searchDescription = 'false' } = req.query;
+  const { term, username, searchDescription = 'false' } = req.query;
   let responded = false;
   
-  // Validate required parameters
-  if (!term || !user) {
+  if (!term || !username) {
     return res.status(400).json({
-      error: 'Both "term" and "user" query parameters are required'
+      error: 'Both "term" and "username" query parameters are required'
     });
   }
 
-  // Prepare search parameters
-  const searchTerm = `%${term}%`;
-  const searchDesc = searchDescription.toLowerCase() === 'true';
-  
-  let sql = `
-    SELECT t.*, pr.pr_name as priority_name 
-    FROM t_todo t
-    JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
-    WHERE t.t_user = @user
-      AND (t.t_title LIKE @term
-  `;
-  
-  // Conditionally add description search
-  if (searchDesc) {
-    sql += ` OR t.t_description LIKE @term`;
-  }
-  
-  sql += `)`;
-  
-  executeQuery(
-    sql,
-    [
-      { name: 'user', type: TYPES.VarChar, value: user },
-      { name: 'term', type: TYPES.VarChar, value: searchTerm }
-    ],
-    (err, data) => {
-      if (responded) return;
-      responded = true;
-      
-      if (err) {
-        console.error('Search error:', err);
-        return res.status(500).json({ error: err.message });
-      }
-      
-      res.json(data);
+  getUserId(username, (err, userId) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!userId) return res.status(404).json({ error: 'User not found' });
+
+    const searchTerm = `%${term}%`;
+    const searchDesc = searchDescription.toLowerCase() === 'true';
+    
+    let sql = `
+      SELECT t.*, pr.pr_name as priority_name 
+      FROM t_todo t
+      JOIN pr_priority pr ON t.t_pr_priority = pr.pr_id
+      WHERE t.u_user_id = @userId
+        AND (t.t_titel LIKE @term
+    `;
+    
+    if (searchDesc) {
+      sql += ` OR t.t_description LIKE @term`;
     }
-  );
+    
+    sql += `)`;
+    
+    executeQuery(
+      sql,
+      [
+        { name: 'userId', type: TYPES.Int, value: userId },
+        { name: 'term', type: TYPES.VarChar, value: searchTerm }
+      ],
+      (err, data) => {
+        if (responded) return;
+        responded = true;
+        
+        if (err) {
+          console.error('Search error:', err);
+          return res.status(500).json({ error: err.message });
+        }
+        
+        res.json(data);
+      }
+    );
+  });
 });
 
-// Add before app.listen
+// ERROR HANDLING AND SERVER START
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  // Graceful shutdown
 });
 
 process.on('unhandledRejection', (reason, promise) => {
